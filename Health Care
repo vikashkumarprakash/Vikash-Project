@@ -1,1 +1,250 @@
 
+---
+title: "Claims Data in R"
+output: pdf_document
+---
+
+
+```{r setup, include=TRUE}
+knitr::opts_chunk$set()
+```
+### Import the data 
+
+```{r}
+Claims = read.csv("C://Users/vikash/Documents/Data Science/Analytics Edge/Unit 4/Healthcare Costs, Case - 2/ClaimsData.csv")
+```
+Let's look at the structure of DataSet
+
+```{r}
+str(Claims)
+```
+###Variables
+Our independent variables are from 2008, and we will be predicting cost in 2009.
+
+Our independent variables are the patient's age in years at the end of 2008, 
+and then several binary variables indicating whether or not the patient had
+diagnosis codes for a particular disease or related disorder in 2008: 
+alzheimers, arthritis, cancer, chronic obstructive pulmonary disease, 
+or copd, depression, diabetes, heart.failure, ischemic heart disease,
+or ihd, kidney disease, osteoporosis, and stroke.
+
+Each of these variables will take value 1 if the patient had
+a diagnosis code for the particular disease and value 0
+otherwise.
+`Reimbursement2008` is the total amount of Medicare reimbursements for this patient in 2008.
+And `Reimbursement2009` is the total value of all Medicare reimbursements for the patient in 2009.
+`Bucket2008` is the cost bucket the patient fell into in 2008,
+and `bucket2009` is the cost bucket the patient fell into in 2009.
+
+These cost buckets are defined using the thresholds determined
+by D2Hawkeye.
+
+So the first cost bucket contains patients with costs less than $3,000, the second cost bucket contains patients with costs between $3,000 and $8,000,
+and so on.
+
+We can verify that the number of patients in each cost bucket
+has the same structure as what we saw for D2Hawkeye by computing the 
+percentage of patients in each cost bucket.
+
+So we'll create a `table` of the variable bucket2009 and divide by the number of rows in Claims.
+This gives the percentage of patients in each of the cost buckets.
+```{r}
+table(Claims$bucket2009)/nrow(Claims)*100
+```
+The first cost bucket has almost 70% of the patients.
+The second cost bucket has about 20% of the patients.
+And the remaining 10% are split between the final three cost
+buckets.
+
+###Goal
+
+So the vast majority of patients in this data set have low cost.
+Our goal will be to predict the cost bucket the patient fell
+into in 2009 using a CART model.
+
+###Preparing the Data
+But before we build our model, we need to split our data 
+into a training set and a testing set.
+So we'll load the package `caTools`
+```{r}
+library(caTools)
+```
+and then we'll set our random seed to 88 so that we all get the same split.
+```{r}
+set.seed(88)
+```
+And we'll use the `sample.split` function,
+where our dependent variable is `Claims$bucket2009`,
+and we'll set our SplitRatio to be 0.6.  
+```{r}
+spl = sample.split(Claims$bucket2009, SplitRatio = 0.6)
+```
+So we'll put 60% of the data in the training set.
+We'll call our training set `ClaimsTrain`, and we'll take the observations of Claims for which `spl` is exactly equal to TRUE.
+```{r}
+ClaimsTrain = subset(Claims, spl==TRUE)
+```
+And our testing set will be called ClaimsTest, where we'll take the observations of Claims for which spl is exactly equal to FALSE.
+```{r}
+ClaimsTest = subset(Claims, spl==FALSE)
+```
+
+```{r}
+mean(ClaimsTrain$age)
+```
+What proportion of people in the training set (ClaimsTrain) had at least one diagnosis code for diabetes?
+```{r}
+table(ClaimsTrain$diabetes==1)/length(ClaimsTrain$diabetes)
+```
+## Baseline Method and Penalty Matrix
+Let's now see how the baseline method used by D2Hawkeye would perform on this data set.
+The baseline method would predict that the cost bucket for a patient in 2009
+will be the same as it was in 2008.
+So let's create a classification matrix to compute the accuracy
+for the baseline method on the test set.
+So we'll use the `table` function, where the actual outcomes are
+`ClaimsTest$bucket2009`, and our predictions are `ClaimsTest$bucket2008`
+```{r}
+table(ClaimsTest$bucket2009, ClaimsTest$bucket2008)
+```
+The accuracy is the sum of the diagonal, the observations that
+were classified correctly, divided by the total number of observations in our test set.
+
+Accuracy=
+```{r}
+(sum(diag(table(ClaimsTest$bucket2009,ClaimsTest$bucket2008))))/nrow(ClaimsTest)
+```
+So the accuracy of the baseline method is `0.68`.
+
+### Penalty Error
+Now how about the penalty error??
+
+To compute this, we need to first create a penalty matrix in R. 
+Keep in mind that we'll put the actual **outcomes** on the left, and the **predicted** outcomes on the top.
+
+#### Creating the Matrix
+
+We'll call it `PenaltyMatrix`, 
+The numbers that should fill up the matrix are : 
+First row -  0, 1, 2, 3, 4
+Second Row - 2, 0, 1, 2, 3 
+Third row -  4, 2, 0, 1, 2 
+Fourth row - 6, 4, 2, 0, 1  
+Fifth row  - 8, 6, 4, 2, 0
+```{r}
+PenaltyMatrix = matrix(c(0,1,2,3,4,2,0,1,2,3,4,2,0,1,2,6,4,2,0,1,8,6,4,2,0), byrow=TRUE, nrow=5)
+PenaltyMatrix
+```
+The `actual outcomes` are on the `left`, and the `predicted outcomes` are on the   `top`.
+So the worst outcomes are when we predict a low cost bucket,
+but the actual outcome is a high cost bucket.
+We still give ourselves a penalty when we predict a high cost bucket
+and it's actually a low cost bucket, but it's not as bad.
+
+#### Penalty Error
+
+So now to compute the penalty error of the baseline method, we can multiply our classification matrix by the penalty matrix.
+
+```{r}
+as.matrix(table(ClaimsTest$bucket2009, ClaimsTest$bucket2008))*PenaltyMatrix
+```
+
+So now to compute the `penalty error`, we just need to sum it up and divide
+by the number of observations in our test set.
+
+```{r}
+PenaltyError<-sum(as.matrix(table(ClaimsTest$bucket2009, ClaimsTest$bucket2008))*PenaltyMatrix)/nrow(ClaimsTest)
+PenaltyError
+```
+So the penalty error for the baseline method is 0.74.
+
+### Conclusion
+
+Now our goal will be to create a CART model that has an **accuracy** higher than 68% and a **penalty error** lower than 0.74.
+
+### Quick Question 
+
+Suppose that instead of the baseline method discussed in the previous video, we used the baseline method of predicting the most frequent outcome for all observations. This new baseline method would predict cost bucket 1 for everyone.
+
+What would the accuracy of this baseline method be on the test set?
+```{r}
+pred<-rep(1,nrow(ClaimsTest))
+table(ClaimsTest$bucket2009,pred)
+table(ClaimsTest$bucket2009)[1]/nrow(ClaimsTest)
+table(ClaimsTest$bucket2009)
+```
+What would the penalty error of this baseline method be on the test set?
+```{r}
+(0*122978 + 2*34840 + 4*16390 + 6*7937 + 8*1057)/nrow(ClaimsTest)
+```
+
+
+##  Predicting Healthcare Costs in R
+
+We'll build a CART model to predict healthcare cost.
+First, let's make sure the packages `rpart` and `rpart.plot`
+are loaded with the library function.
+```{r}
+library(rpart)
+library(rpart.plot)
+```
+We'll call our model `ClaimsTree`.
+And we'll use the `rpart` function to predict `bucket2009`,
+using as independent variables: `age` , `arthritis`,`alzheimers`,
+`cancer`, `copd`, `depression`, `diabetes`, `heart.failure`, `ihd`,
+`kidney`, `osteoporosis`, and `stroke`.
+
+We'll also use `bucket2008` and `reimbursement2008`.
+The data set we'll use to build our model is `ClaimsTrain`.
+And then we'll add the arguments,  `method = "class"`, since we have a classification problem here, and `cp = 0.00005` .  
+
+Note: Even though we have a multi-class classification
+problem here, we build our tree in the same way as a binary classification problem.
+
+The cp value we're using here was selected through cross-validation on the training set.
+```{r cross validation}
+library(caret)
+# 10-fold cv
+numfolds<-trainControl(method="cv",number=10)
+# Range of cp values, change it to find best cp value
+cpGrid<-expand.grid(cp=seq(0.001,0.005,0.001))
+# Building the model with cv using caret library
+model_cv<-train(as.factor(bucket2009) ~ age + alzheimers + arthritis + cancer + copd + depression + diabetes + heart.failure + ihd + kidney + osteoporosis + stroke + bucket2008 + reimbursement2008, data=ClaimsTrain, method="rpart",trControl=numfolds,tuneGrid=cpGrid)
+plot(model_cv)
+```
+Making the model with best cp i.e `cp=0.00005`
+```{r model}
+ClaimsTree = rpart(bucket2009 ~ age + alzheimers + arthritis + cancer + copd + depression + diabetes + heart.failure + ihd + kidney + osteoporosis + stroke + bucket2008 + reimbursement2008, data=ClaimsTrain, method="class", cp=0.00005)
+library(rpart.plot)
+prp(ClaimsTree)
+```
+#### Let's make predictions on the test data, using this model
+```{r predictions}
+PredictTest = predict(ClaimsTree, newdata = ClaimsTest, type = "class")
+# Comparing with actual values 
+table(ClaimsTest$bucket2009, PredictTest)
+# Our model is not classifying any patients in the Class 5, because we have unbalanced data 
+# Calculating Accuracy 
+(114141 + 16102 + 118 + 201 + 0)/nrow(ClaimsTest)
+# Computing Penalty Error
+as.matrix(table(ClaimsTest$bucket2009, PredictTest))*PenaltyMatrix
+PenaltyError<-sum(as.matrix(table(ClaimsTest$bucket2009,PredictTest))*PenaltyMatrix)/nrow(ClaimsTest)
+PenaltyError
+```
+Incorporating loss matrix in the new model
+```{r CART model with loss matrix}
+ClaimsTree = rpart(bucket2009 ~ age + alzheimers + arthritis + cancer + copd + depression + diabetes + heart.failure + ihd + kidney + osteoporosis + stroke + bucket2008 + reimbursement2008, data=ClaimsTrain, method="class", cp=0.00005, parms=list(loss=PenaltyMatrix))
+prp(ClaimsTree)  
+```
+### Making Predictions
+```{r}
+PredictTest = predict(ClaimsTree, newdata = ClaimsTest, type = "class")
+# Comparing with actual values 
+table(ClaimsTest$bucket2009, PredictTest)
+# Calculating accuracy and penalty error
+sum(diag(table(ClaimsTest$bucket2009, PredictTest)))/nrow(ClaimsTest)
+# Computing Penalty Error
+as.matrix(table(ClaimsTest$bucket2009, PredictTest))*PenaltyMatrix
+PenaltyError<-sum(as.matrix(table(ClaimsTest$bucket2009,PredictTest))*PenaltyMatrix)/nrow(ClaimsTest)
+PenaltyError
+```
